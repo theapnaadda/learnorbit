@@ -421,7 +421,7 @@
             </div>
         );
 
-        // Expandable Chapter Card (Added Smooth Expand/Collapse Animation using CSS Grid)
+        // Expandable Chapter Card
         const ChapterCard = ({ chapterName, data, index, subjectData }) => {
             const [isExpanded, setIsExpanded] = useState(false);
             const [activeTab, setActiveTab] = useState('notes'); 
@@ -600,7 +600,7 @@
             </div>
         );
 
-        // --- CUSTOMER SUPPORT (Migrated to Realtime Database) ---
+        // --- CUSTOMER SUPPORT ---
         
         const SupportChat = ({ user, closeChat, showToast }) => {
             const [input, setInput] = useState('');
@@ -806,7 +806,16 @@
             const [form, setForm] = useState({ id: null, classLevel: '11', subject: SUBJECTS_DATA[0].name, chapter: CHAPTERS_DATA['11'][SUBJECTS_DATA[0].name]?.[0] || '', title: '', pdfLink: '' });
 
             useEffect(() => {
-                const unsubMats = db.collection('materials').orderBy('timestamp', 'desc').onSnapshot(snap => setMaterials(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
+                // FIX: Removed .orderBy() here and added manual sorting so missing timestamps never hide data from UI
+                const unsubMats = db.collection('materials').onSnapshot(snap => {
+                    const fetchedMaterials = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    fetchedMaterials.sort((a, b) => {
+                        const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+                        const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+                        return timeB - timeA;
+                    });
+                    setMaterials(fetchedMaterials);
+                });
                 
                 // Fetch chats from Realtime DB
                 const chatsRef = rtdb.ref('support_chats');
@@ -851,9 +860,24 @@
             const handleSaveMaterial = async (e, type) => {
                 e.preventDefault(); setLoading(true);
                 try {
-                    const payload = { ...form, type, timestamp: form.id ? undefined : firebase.firestore.FieldValue.serverTimestamp() };
+                    // FIX: We explicitly extract exactly the required fields. 
+                    // This prevents wiping out the existing timestamp during an update which caused documents to vanish.
+                    const payload = { 
+                        classLevel: form.classLevel,
+                        subject: form.subject,
+                        chapter: form.chapter,
+                        title: form.title,
+                        pdfLink: form.pdfLink,
+                        type: type
+                    };
+                    
+                    if (!form.id) {
+                        payload.timestamp = firebase.firestore.FieldValue.serverTimestamp();
+                    }
+                    
                     if (form.id) await db.collection('materials').doc(form.id).update(payload);
                     else await db.collection('materials').add(payload);
+                    
                     setForm({ id: null, classLevel: '11', subject: SUBJECTS_DATA[0].name, chapter: CHAPTERS_DATA['11'][SUBJECTS_DATA[0].name]?.[0] || '', title: '', pdfLink: '' });
                     showToast(form.id ? `Resource updated successfully!` : `${type === 'note' ? 'Notes' : 'Practice Questions'} uploaded successfully!`, "success");
                     setActiveTab(type === 'note' ? 'manage_notes' : 'manage_practice');
