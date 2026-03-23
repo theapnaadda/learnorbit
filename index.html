@@ -109,7 +109,7 @@
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
-        const rtdb = firebase.database(); // Initialized Realtime Database
+        const rtdb = firebase.database();
 
         const { useState, useEffect, useRef } = React;
 
@@ -807,7 +807,6 @@
             const [form, setForm] = useState({ id: null, classLevel: '11', subject: SUBJECTS_DATA[0].name, chapter: CHAPTERS_DATA['11'][SUBJECTS_DATA[0].name]?.[0] || '', title: '', pdfLink: '' });
 
             useEffect(() => {
-                // FIX: Removed .orderBy() here and added manual sorting so missing timestamps never hide data from UI
                 const unsubMats = db.collection('materials').onSnapshot(snap => {
                     const fetchedMaterials = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     fetchedMaterials.sort((a, b) => {
@@ -826,12 +825,14 @@
                         const chatsArray = Object.keys(data).map(key => ({
                             id: key,
                             ...data[key],
-                            messages: data[key].messages ? Object.values(data[key].messages) : []
+                            messages: data[key].messages ? Object.values(data[key].messages).sort((a, b) => a.timestamp - b.timestamp) : []
                         })).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
                         setSupportChats(chatsArray);
                     } else {
                         setSupportChats([]);
                     }
+                }, (error) => {
+                    console.error("Firebase read failed: " + error.name);
                 });
                 
                 db.collection('settings').doc('ai').get().then(doc => { 
@@ -861,8 +862,6 @@
             const handleSaveMaterial = async (e, type) => {
                 e.preventDefault(); setLoading(true);
                 try {
-                    // FIX: We explicitly extract exactly the required fields. 
-                    // This prevents wiping out the existing timestamp during an update which caused documents to vanish.
                     const payload = { 
                         classLevel: form.classLevel,
                         subject: form.subject,
@@ -1124,9 +1123,12 @@
         };
 
         const App = () => {
-            const [route, setRoute] = useState(() => localStorage.getItem('lo_route') || 'home');
-            const [activeClass, setActiveClass] = useState(() => localStorage.getItem('lo_class') || '11');
-            const [selectedSubject, setSelectedSubject] = useState(() => { const saved = localStorage.getItem('lo_subject'); return saved ? JSON.parse(saved) : null; });
+            // Replaced localStorage retrieval with fresh initial states to clear on reload. 
+            // The Auth state silently stays logged in, solving the issue beautifully.
+            const [route, setRoute] = useState('home'); 
+            const [activeClass, setActiveClass] = useState('11');
+            const [selectedSubject, setSelectedSubject] = useState(null);
+
             const [user, setUser] = useState(null);
             const [isAdmin, setIsAdmin] = useState(false);
             const [chatOpen, setChatOpen] = useState(false);
@@ -1143,16 +1145,14 @@
             }, [route]);
 
             const handleNavigate = (newRoute, targetSubject = undefined) => {
-                setRoute(newRoute); localStorage.setItem('lo_route', newRoute);
+                setRoute(newRoute);
                 if (targetSubject !== undefined) {
                     setSelectedSubject(targetSubject);
-                    if(targetSubject === null) localStorage.removeItem('lo_subject');
-                    else localStorage.setItem('lo_subject', JSON.stringify(targetSubject));
                 }
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             };
 
-            const handleClassChange = (newClass) => { setActiveClass(newClass); localStorage.setItem('lo_class', newClass); };
+            const handleClassChange = (newClass) => { setActiveClass(newClass); };
             const triggerSignOut = () => setConfirmSignout(true);
             const executeSignOut = async () => { await auth.signOut(); setConfirmSignout(false); showToast("Logged out successfully.", "success"); handleNavigate('home'); };
             
